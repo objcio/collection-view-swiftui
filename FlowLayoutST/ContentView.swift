@@ -39,40 +39,80 @@ struct FlowLayout {
     }
 }
 
-func flowLayout<Elements>(for elements: Elements, containerSize: CGSize, sizes: [Elements.Element.ID: CGSize]) -> [Elements.Element.ID: CGSize] where Elements: RandomAccessCollection, Elements.Element: Identifiable {
+func flowLayout<Elements>(for elements: Elements, containerSize: CGSize, sizes: [Elements.Element.ID: CGSize]) -> [(Elements.Element.ID, CGSize)] where Elements: RandomAccessCollection, Elements.Element: Identifiable {
     var state = FlowLayout(containerSize: containerSize)
-    var result: [Elements.Element.ID: CGSize] = [:]
+    var result: [(Elements.Element.ID, CGSize)] = []
     for element in elements {
         let rect = state.add(element: sizes[element.id] ?? .zero)
-        result[element.id] = CGSize(width: rect.origin.x, height: rect.origin.y)
+        result.append((element.id, CGSize(width: rect.origin.x, height: rect.origin.y)))
     }
     return result
 }
 
+extension View {
+    func offset(_ point: CGPoint) -> some View {
+        return offset(x: point.x, y: point.y)
+    }
+}
+
 struct CollectionView<Elements, Content>: View where Elements: RandomAccessCollection, Content: View, Elements.Element: Identifiable {
     var data: Elements
-    var layout: (Elements, CGSize, [Elements.Element.ID: CGSize]) -> [Elements.Element.ID: CGSize]
     var content: (Elements.Element) -> Content
+    var didMove: (Elements.Index, Elements.Index) -> ()
     @State private var sizes: [Elements.Element.ID: CGSize] = [:]
+    @State private var dragState: (id: Elements.Element.ID, translation: CGSize, location: CGPoint)? = nil
     
-    private func bodyHelper(containerSize: CGSize, offsets: [Elements.Element.ID: CGSize]) -> some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(data) {
-                PropagateSize(content: self.content($0), id: $0.id)
-                    .offset(offsets[$0.id] ?? CGSize.zero)
-                    .animation(.default)
+    private func dragOffset(for id: (Elements.Element.ID)) -> CGSize? {
+        guard let state = dragState, state.id == id else { return nil }
+        return state.translation
+    }
+    
+    private func bodyHelper(containerSize: CGSize, offsets: [(Elements.Element.ID, CGSize)]) -> some View {
+        var insertionPoint: (id: Elements.Element.ID, offset: CGSize)? {
+            guard let ds = dragState else { return nil }
+            for offset in offsets.reversed() {
+                if  offset.1.width < ds.location.x && offset.1.height < ds.location.y {
+                    return (id: offset.0, offset: offset.1)
+                }
+            }
+            return nil
+        }
+
+        return ZStack(alignment: .topLeading) {
+            ForEach(data) { element in
+                PropagateSize(content: self.content(element), id: element.id)
+                    .offset(offsets.first { element.id == $0.0 }?.1 ?? CGSize.zero)
+                    .offset(self.dragOffset(for: element.id) ?? .zero)
+                    .gesture(DragGesture().onChanged { value in
+                        self.dragState = (element.id, value.translation, value.location)
+                    }.onEnded { _ in
+                        if let ds = self.dragState, let ip = insertionPoint,
+                            let oldIdx = self.data.firstIndex(where: { $0.id == ds.id }),
+                            let newIdx = self.data.firstIndex(where: { $0.id == ip.id }) {
+                            self.didMove(oldIdx, newIdx)
+                        }
+                        self.dragState = nil
+                    })
+            }
+            if insertionPoint != nil {
+                Rectangle()
+                    .fill(Color.red)
+                    .frame(width: 10, height: 40)
+                    .offset(insertionPoint!.offset)
             }
             Color.clear
                 .frame(width: containerSize.width, height: containerSize.height)
                 .fixedSize()
-        }.onPreferenceChange(CollectionViewSizeKey.self) {
-            self.sizes = $0            
+        }.onPreferenceChange(CollectionViewSizeKey.self) { value in
+            withAnimation {
+                self.sizes = value
+            }
         }
     }
     
     var body: some View {
         GeometryReader { proxy in
-            self.bodyHelper(containerSize: proxy.size, offsets: self.layout(self.data, proxy.size, self.sizes))
+            self.bodyHelper(containerSize: proxy.size, offsets: flowLayout(for: self.data, containerSize: proxy.size, sizes: self.sizes))
         }
     }
 }
@@ -103,17 +143,21 @@ extension String: Identifiable {
 }
 
 struct ContentView: View {
-    let strings: [String] = (1...10).map { "Item \($0) " + String(repeating: "x", count: Int.random(in: 0...10)) }
+    @State var strings: [String] = (1...10).map { "Item \($0) " + String(repeating: "x", count: Int.random(in: 0...10)) }
     @State var dividerWidth: CGFloat = 100
     
     var body: some View {
-        CollectionView(data: strings, layout: flowLayout) {
+        CollectionView(data: strings, content: {
             Text($0)
                 .padding(10)
                 .background(Color.blue)
                 .foregroundColor(.white)
                 .cornerRadius(8)
-        }.padding(20)
+        }, didMove: { old, new in
+            withAnimation {
+                self.strings.move(fromOffsets: IndexSet(integer: old), toOffset: new)
+            }
+        }).padding(20)
     }
 }
 
