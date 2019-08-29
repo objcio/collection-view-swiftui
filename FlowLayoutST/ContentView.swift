@@ -49,19 +49,6 @@ func flowLayout<Elements>(for elements: Elements, containerSize: CGSize, sizes: 
     return result
 }
 
-
-func singleLineLayout<Elements>(for elements: Elements, containerSize: CGSize, sizes: [Elements.Element.ID: CGSize]) -> [Elements.Element.ID: CGSize] where Elements: RandomAccessCollection, Elements.Element: Identifiable {
-    var result: [Elements.Element.ID: CGSize] = [:]
-    var offset = CGSize.zero
-    for element in elements {
-        result[element.id] = offset
-        let size = sizes[element.id] ?? CGSize.zero
-        offset.width += size.width + 10
-    }
-    return result
-}
-    
-
 struct CollectionView<Elements, Content>: View where Elements: RandomAccessCollection, Content: View, Elements.Element: Identifiable {
     var data: Elements
     var layout: (Elements, CGSize, [Elements.Element.ID: CGSize]) -> [Elements.Element.ID: CGSize]
@@ -79,9 +66,8 @@ struct CollectionView<Elements, Content>: View where Elements: RandomAccessColle
                 .frame(width: containerSize.width, height: containerSize.height)
                 .fixedSize()
         }.onPreferenceChange(CollectionViewSizeKey.self) {
-            self.sizes = $0
-            
-        }.background(Color.red)
+            self.sizes = $0            
+        }
     }
     
     var body: some View {
@@ -121,19 +107,13 @@ struct ContentView: View {
     @State var dividerWidth: CGFloat = 100
     
     var body: some View {
-        VStack {
-            HStack {
-                Rectangle()
-                    .fill(Color.red)
-                    .frame(width: dividerWidth)
-                CollectionView(data: strings, layout: flowLayout) {
-                    Text($0)
-                        .padding(10)
-                        .background(Color.gray)
-                }
-            }
-            Slider(value: $dividerWidth, in: 0...500)
-        }
+        CollectionView(data: strings, layout: flowLayout) {
+            Text($0)
+                .padding(10)
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(8)
+        }.padding(20)
     }
 }
 
